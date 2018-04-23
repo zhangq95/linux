@@ -24,6 +24,11 @@ struct cpuacct_usage {
 	u64	usages[CPUACCT_STAT_NSTATS];
 };
 
+/* Processes status of a group of task and its child cgroups */
+struct cpuacct_procs_stat {
+	unsigned long procs_stat[CPUACCT_PROCS_STAT_NSTATS];
+};
+
 /* track CPU usage of a group of tasks and its child groups */
 struct cpuacct {
 	struct cgroup_subsys_state	css;
