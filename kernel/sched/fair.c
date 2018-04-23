@@ -23,6 +23,7 @@
 #include "sched.h"
 
 #include <trace/events/sched.h>
+#include <linux/cgroup.h>
 
 /*
  * Targeted preemption latency for CPU-bound tasks:
@@ -4732,6 +4733,22 @@ static int tg_throttle_down(struct task_group *tg, void *data)
 	return 0;
 }
 
+void update_cpuacct_running_from_cfs(struct cfs_rq *cfs_rq, int inc)
+{
+	struct rq *rq;
+	int cpu = 0;
+
+	if (!cfs_rq)
+		return;
+
+	rq = rq_of(cfs_rq);
+	if (!rq)
+		return;
+
+	cpu = cpu_of(rq);
+	update_cpuacct_running_from_tg(cfs_rq->tg, cpu, inc);
+}
+
 static void throttle_cfs_rq(struct cfs_rq *cfs_rq)
 {
 	struct rq *rq = rq_of(cfs_rq);
@@ -4757,6 +4774,7 @@ static void throttle_cfs_rq(struct cfs_rq *cfs_rq)
 		if (dequeue)
 			dequeue_entity(qcfs_rq, se, DEQUEUE_SLEEP);
 		qcfs_rq->h_nr_running -= task_delta;
+		update_cpuacct_running_from_cfs(qcfs_rq, -task_delta);
 
 		if (qcfs_rq->load.weight)
 			dequeue = 0;
@@ -4820,6 +4838,7 @@ void unthrottle_cfs_rq(struct cfs_rq *cfs_rq)
 		if (enqueue)
 			enqueue_entity(cfs_rq, se, ENQUEUE_WAKEUP);
 		cfs_rq->h_nr_running += task_delta;
+		update_cpuacct_running_from_cfs(cfs_rq, task_delta);
 
 		if (cfs_rq_throttled(cfs_rq))
 			break;
@@ -5379,6 +5398,7 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 		if (cfs_rq_throttled(cfs_rq))
 			break;
 		cfs_rq->h_nr_running++;
+		update_cpuacct_running_from_cfs(cfs_rq, 1);
 
 		flags = ENQUEUE_WAKEUP;
 	}
@@ -5386,6 +5406,7 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 	for_each_sched_entity(se) {
 		cfs_rq = cfs_rq_of(se);
 		cfs_rq->h_nr_running++;
+		update_cpuacct_running_from_cfs(cfs_rq, 1);
 
 		if (cfs_rq_throttled(cfs_rq))
 			break;
@@ -5427,6 +5448,7 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 		if (cfs_rq_throttled(cfs_rq))
 			break;
 		cfs_rq->h_nr_running--;
+		update_cpuacct_running_from_cfs(cfs_rq, -1);
 
 		/* Don't dequeue parent if it has other entities besides us */
 		if (cfs_rq->load.weight) {
@@ -5446,6 +5468,7 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 	for_each_sched_entity(se) {
 		cfs_rq = cfs_rq_of(se);
 		cfs_rq->h_nr_running--;
+		update_cpuacct_running_from_cfs(cfs_rq, -1);
 
 		if (cfs_rq_throttled(cfs_rq))
 			break;

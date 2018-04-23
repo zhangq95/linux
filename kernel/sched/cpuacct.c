@@ -24,12 +24,18 @@ struct cpuacct_usage {
 	u64	usages[CPUACCT_STAT_NSTATS];
 };
 
+/* Processes status of a group of task and its child cgroups */
+struct cpuacct_procs_stat {
+	unsigned long procs_stat[CPUACCT_PROCS_STAT_NSTATS];
+};
+
 /* track CPU usage of a group of tasks and its child groups */
 struct cpuacct {
 	struct cgroup_subsys_state	css;
 	/* cpuusage holds pointer to a u64-type object on every CPU */
 	struct cpuacct_usage __percpu	*cpuusage;
 	struct kernel_cpustat __percpu	*cpustat;
+	struct cpuacct_procs_stat *procs_stat;
 };
 
 static inline struct cpuacct *css_ca(struct cgroup_subsys_state *css)
@@ -37,6 +43,12 @@ static inline struct cpuacct *css_ca(struct cgroup_subsys_state *css)
 	return css ? container_of(css, struct cpuacct, css) : NULL;
 }
 
+/*return cpu accounting group corresponding to this container*/
+static inline struct cpuacct *cgroup_ca(struct cgroup *cgrp)
+{
+	return container_of(global_cgroup_css(cgrp, cpuacct_cgrp_id),
+					struct cpuacct, css);
+}
 /* Return CPU accounting group to which this task belongs */
 static inline struct cpuacct *task_ca(struct task_struct *tsk)
 {
@@ -49,10 +61,80 @@ static inline struct cpuacct *parent_ca(struct cpuacct *ca)
 }
 
 static DEFINE_PER_CPU(struct cpuacct_usage, root_cpuacct_cpuusage);
+static DEFINE_PER_CPU(struct cpuacct_procs_stat, root_cpuacct_procs_stat);
 static struct cpuacct root_cpuacct = {
 	.cpustat	= &kernel_cpustat,
 	.cpuusage	= &root_cpuacct_cpuusage,
+	.procs_stat = &root_cpuacct_procs_stat,
 };
+
+/* Determine the task is in the root_cpuacct */
+bool task_in_nonroot_cpuacct(struct task_struct *tsk)
+{
+	struct cpuacct *ca = task_ca(tsk);
+
+	if (ca && (ca != &root_cpuacct))
+		return true;
+	else
+		return false;
+}
+
+/* return processes stat of a group to which this task belongs */
+unsigned long task_ca_procs_stat(struct task_struct *tsk, int cpu,
+	int index)
+{
+	struct cpuacct *ca;
+	unsigned long res = 0;
+
+	if (!tsk)
+		return 0;
+
+	ca = task_ca(tsk);
+	if (ca)
+		res = per_cpu_ptr(ca->procs_stat, cpu)->procs_stat[index];
+
+	return res;
+}
+
+/* update processes stat of a group to which this task belongs */
+void update_cpuacct_procs_stat(struct task_struct *tsk, int cpu, int index,
+	int inc)
+{
+	struct cpuacct *ca;
+	unsigned long *res;
+
+	if (!tsk)
+		return;
+
+	ca = task_ca(tsk);
+	if (ca) {
+		res = &(per_cpu_ptr(ca->procs_stat, cpu)->procs_stat[index]);
+		*res += inc;
+	}
+}
+
+/* update processes stat of a group to which this task belongs from a task_group */
+void update_cpuacct_running_from_tg(struct task_group *tg, int cpu, int inc)
+{
+	struct cgroup *cgrp;
+	struct cpuacct *ca;
+	unsigned long *nr_running;
+	struct cpuacct_procs_stat *procs_stat;
+
+	if (!tg)
+		return;
+
+	cgrp = tg->css.cgroup;
+	if (!cgrp)
+		return;
+
+	ca = cgroup_ca(cgrp);
+	if (ca && (ca != &root_cpuacct)) {
+		procs_stat = per_cpu_ptr(ca->procs_stat, cpu);
+		nr_running = &(procs_stat->procs_stat[CPUACCT_PROCS_RUNNING]);
+		*nr_running += inc;
+	}
+}
 
 /* Create a new CPU accounting group */
 static struct cgroup_subsys_state *
@@ -74,9 +156,14 @@ cpuacct_css_alloc(struct cgroup_subsys_state *parent_css)
 	ca->cpustat = alloc_percpu(struct kernel_cpustat);
 	if (!ca->cpustat)
 		goto out_free_cpuusage;
+	ca->procs_stat = alloc_percpu(struct cpuacct_procs_stat);
+	if (!ca->procs_stat)
+		goto out_free_stat;
 
 	return &ca->css;
 
+out_free_stat:
+	free_percpu(ca->procs_stat);
 out_free_cpuusage:
 	free_percpu(ca->cpuusage);
 out_free_ca:
@@ -92,6 +179,7 @@ static void cpuacct_css_free(struct cgroup_subsys_state *css)
 
 	free_percpu(ca->cpustat);
 	free_percpu(ca->cpuusage);
+	free_percpu(ca->procs_stat);
 	kfree(ca);
 }
 
