@@ -54,6 +54,8 @@
 #include <linux/proc_ns.h>
 #include <linux/nsproxy.h>
 #include <linux/file.h>
+#include <linux/cgroup.h>
+#include <linux/pid_namespace.h>
 #include <net/sock.h>
 
 #define CREATE_TRACE_POINTS
@@ -483,6 +485,12 @@ static struct cgroup_subsys_state *cgroup_tryget_css(struct cgroup *cgrp,
 	rcu_read_unlock();
 
 	return css;
+}
+
+struct cgroup_subsys_state *global_cgroup_css(struct cgroup *cgrp,
+						     int ssid)
+{
+	return cgroup_tryget_css(cgrp, cgroup_subsys[(ssid)]);
 }
 
 /**
@@ -4315,6 +4323,86 @@ static int cgroup_procs_show(struct seq_file *s, void *v)
 	return 0;
 }
 
+static int cgroup_procs_stat_show(struct seq_file *s, void *v)
+{
+	struct kernfs_open_file *of = s->private;
+	struct cgroup *cgrp = seq_css(s)->cgroup;
+	struct cgroup_pidlist *l;
+	enum cgroup_filetype type = seq_cft(s)->private;
+	struct task_struct *tsk;
+	int ret, i = 0;
+	unsigned long forks = 0, iowait = 0, nr_runnable = 0;
+	pid_t *start;
+	struct timespec64 boottime;
+	unsigned long long start_time, switches = 0;
+	struct cpumask cpus_allowed;
+
+	mutex_lock(&cgrp->pidlist_mutex);
+	if (of->priv)
+		of->priv = cgroup_pidlist_find(cgrp, type);
+
+	if (!of->priv) {
+		ret = pidlist_array_load(cgrp, type,
+					 (struct cgroup_pidlist **)&of->priv);
+		if (ret)
+			return ERR_PTR(ret);
+	}
+	l = of->priv;
+
+	start = l->list;
+
+	tsk = find_task_by_pid_ns(*start, &init_pid_ns);
+	getboottime64(&boottime);
+
+	if (in_noninit_pid_ns(tsk) &&
+		task_in_nonroot_cpuacct(tsk)) {
+		if (task_css(tsk, cpuset_cgrp_id)) {
+			memset(&cpus_allowed, 0, sizeof(cpus_allowed));
+			get_tsk_cpu_allowed(tsk, &cpus_allowed);
+		}
+
+		start_time = tsk->real_start_time / NSEC_PER_SEC;
+		start_time += (unsigned long long)boottime.tv_sec;
+
+		for_each_cpu_and(i, cpu_possible_mask, &cpus_allowed) {
+			switches += task_ca_procs_stat(tsk, i,
+				CPUACCT_PROCS_SWITCHES);
+			forks += task_ca_procs_stat(tsk, i,
+				CPUACCT_PROCS_FORKS);
+			nr_runnable += task_ca_procs_stat(tsk, i,
+				CPUACCT_PROCS_RUNNING);
+			iowait += task_ca_procs_stat(tsk, i,
+				CPUACCT_PROCS_IOWAIT);
+		}
+
+	} else {
+		cpumask_copy(&cpus_allowed, cpu_possible_mask);
+		nr_runnable = nr_running();
+		forks = total_forks;
+		iowait = nr_iowait();
+		switches = nr_context_switches();
+		start_time = (unsigned long long)boottime.tv_sec;
+	}
+
+	seq_printf(s,
+		"ctxt %llu\n"
+		"btime %llu\n"
+		"processes %lu\n"
+		"procs_running %lu\n"
+		"procs_blocked %lu\n",
+		switches,
+		start_time,
+		forks,
+		nr_runnable,
+		iowait);
+
+	mod_delayed_work(cgroup_pidlist_destroy_wq, &l->destroy_dwork,
+		CGROUP_PIDLIST_DESTROY_DELAY);
+	mutex_unlock(&cgrp->pidlist_mutex);
+
+	return 0;
+}
+
 static int cgroup_procs_write_permission(struct cgroup *src_cgrp,
 					 struct cgroup *dst_cgrp,
 					 struct super_block *sb)
@@ -4498,6 +4586,11 @@ static struct cftype cgroup_base_files[] = {
 		.name = "cpu.stat",
 		.flags = CFTYPE_NOT_ON_ROOT,
 		.seq_show = cpu_stat_show,
+	},
+	{
+		.name = "cgroup.procs_stat",
+		.seq_show = cgroup_procs_stat_show,
+		.write = cgroup_procs_write,
 	},
 	{ }	/* terminate */
 };

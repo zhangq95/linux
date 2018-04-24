@@ -1958,6 +1958,11 @@ static __latent_entropy struct task_struct *copy_process(
 	}
 
 	total_forks++;
+	if (task_active_pid_ns(p)->child_reaper != init_pid_ns.child_reaper) {
+		update_cpuacct_procs_stat(task_active_pid_ns(p)->child_reaper,
+			task_active_pid_ns(p)->child_reaper->cpu,
+			CPUACCT_PROCS_FORKS, 1);
+	}
 	spin_unlock(&current->sighand->siglock);
 	syscall_tracepoint_update(p);
 	write_unlock_irq(&tasklist_lock);
