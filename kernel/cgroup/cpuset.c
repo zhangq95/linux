@@ -2437,9 +2437,7 @@ void cpuset_cpus_allowed(struct task_struct *tsk, struct cpumask *pmask)
  * @pmask: pointer to struct cpumask variable to receive cpus_allowed set.
  *
  * Description: Returns the cpumask_var_t cpus_allowed of the cpuset
- * attached to the specified @tsk.  Guaranteed to return some non-empty
- * subset of cpu_online_mask, even if this means going outside the
- * tasks cpuset.
+ * accoring to the specified @tsk.
  **/
 void get_tsk_cpu_allowed(struct task_struct *tsk, struct cpumask *pmask)
 {
