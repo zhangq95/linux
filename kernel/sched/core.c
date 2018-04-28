@@ -3414,7 +3414,7 @@ static void __sched notrace __schedule(bool preempt)
 		prev_root = task_active_pid_ns(prev)->child_reaper;
 		if (prev_root != init_pid_ns.child_reaper)
 			update_cpuacct_procs_stat(prev, prev->cpu,
-				CPUACCT_PROCS_SWITCHES, 1);
+				CPUACCT_PROCS_SWITCHES, 1, 0);
 	}
 
 	schedule_debug(prev);
@@ -3474,7 +3474,7 @@ static void __sched notrace __schedule(bool preempt)
 		next_root = task_active_pid_ns(next)->child_reaper;
 		if (prev_root && prev_root != next_root)
 			update_cpuacct_procs_stat(next, next->cpu,
-				CPUACCT_PROCS_SWITCHES, 1);
+				CPUACCT_PROCS_SWITCHES, 1, 0);
 	}
 	clear_tsk_need_resched(prev);
 	clear_preempt_need_resched();

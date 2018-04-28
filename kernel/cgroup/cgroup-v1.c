@@ -7,12 +7,15 @@
 #include <linux/mm.h>
 #include <linux/sched/signal.h>
 #include <linux/sched/task.h>
+#include <linux/sched/stat.h>
 #include <linux/magic.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
 #include <linux/delayacct.h>
 #include <linux/pid_namespace.h>
+#include <linux/kernel_stat.h>
 #include <linux/cgroupstats.h>
+#include <linux/cpuset.h>
 
 #include <trace/events/cgroup.h>
 
@@ -604,6 +607,106 @@ static int cgroup_sane_behavior_show(struct seq_file *seq, void *v)
 	return 0;
 }
 
+static int cgroup_procs_stat_show(struct seq_file *s, void *v)
+{
+	struct kernfs_open_file *of = s->private;
+	struct cgroup *cgrp = seq_css(s)->cgroup;
+	struct cgroup_pidlist *l;
+	enum cgroup_filetype type = seq_cft(s)->private;
+	struct task_struct *tsk;
+	int ret, i = 0;
+	unsigned long forks = 0, iowait = 0, nr_runnable = 0;
+	pid_t *start;
+	struct timespec64 boottime;
+	unsigned long long start_time, switches = 0;
+	unsigned int per_softirq_nums[NR_SOFTIRQS] = {0};
+	unsigned int sum_softirq = 0;
+	struct cpumask cpus_allowed;
+
+	mutex_lock(&cgrp->pidlist_mutex);
+	if (of->priv)
+		of->priv = cgroup_pidlist_find(cgrp, type);
+
+	if (!of->priv) {
+		ret = pidlist_array_load(cgrp, type,
+					 (struct cgroup_pidlist **)&of->priv);
+		if (ret)
+			return ERR_PTR(ret);
+	}
+	l = of->priv;
+
+	start = l->list;
+
+	tsk = find_task_by_pid_ns(*start, &init_pid_ns);
+	getboottime64(&boottime);
+
+	if (in_noninit_pid_ns(tsk) &&
+		task_in_nonroot_cpuacct(tsk)) {
+		if (task_css(tsk, cpuset_cgrp_id)) {
+			memset(&cpus_allowed, 0, sizeof(cpus_allowed));
+			get_tsk_cpu_allowed(tsk, &cpus_allowed);
+		}
+
+		start_time = tsk->real_start_time / NSEC_PER_SEC;
+		start_time += (unsigned long long)boottime.tv_sec;
+
+		for_each_cpu_and(i, cpu_possible_mask, &cpus_allowed) {
+			switches += task_ca_procs_stat(tsk, i,
+				CPUACCT_PROCS_SWITCHES, 0);
+			forks += task_ca_procs_stat(tsk, i,
+				CPUACCT_PROCS_FORKS, 0);
+			nr_runnable += task_ca_procs_stat(tsk, i,
+				CPUACCT_PROCS_RUNNING, 0);
+			iowait += task_ca_procs_stat(tsk, i,
+				CPUACCT_PROCS_IOWAIT, 0);
+
+			for (j = 0; j < NR_SOFTIRQS; j++) {
+				tmp = task_ca_procs_stat(tsk, i, j, 1);
+				per_softirq_nums[j] += tmp;
+				sum_softirq += tmp;
+			}
+		}
+
+	} else {
+		cpumask_copy(&cpus_allowed, cpu_possible_mask);
+		nr_runnable = nr_running();
+		forks = total_forks;
+		iowait = nr_iowait();
+		switches = nr_context_switches();
+		start_time = (unsigned long long)boottime.tv_sec;
+
+		for (j = 0; j < NR_SOFTIRQS; j++) {
+			unsigned long softirq_stat = kstat_softirqs_cpu(j, i);
+			per_softirq_nums[j] += softirq_stat;
+			sum_softirq += softirq_stat;	
+		}
+	}
+
+	seq_printf(s, "softirq %ld ", sum_softirq);
+	for (j = 0; j < NR_SOFTIRQS; j++) {
+		seq_printf(s, "%ld ", per_softirq_nums[j]);
+	}
+	seq_printf(s, "\n");
+
+	seq_printf(s,
+		"ctxt %llu\n"
+		"btime %llu\n"
+		"processes %lu\n"
+		"procs_running %lu\n"
+		"procs_blocked %lu\n",
+		switches,
+		start_time,
+		forks,
+		nr_runnable,
+		iowait);
+
+	mod_delayed_work(cgroup_pidlist_destroy_wq, &l->destroy_dwork,
+		CGROUP_PIDLIST_DESTROY_DELAY);
+	mutex_unlock(&cgrp->pidlist_mutex);
+
+	return 0;
+}
+
 static u64 cgroup_read_notify_on_release(struct cgroup_subsys_state *css,
 					 struct cftype *cft)
 {
@@ -678,6 +781,11 @@ struct cftype cgroup1_base_files[] = {
 		.write = cgroup_release_agent_write,
 		.max_write_len = PATH_MAX - 1,
 	},
+	{
+		.name = "cgroup.procs_stat",
+		.seq_show = cgroup_procs_stat_show,
+		.write = cgroup1_procs_write,
+	},	
 	{ }	/* terminate */
 };
 

@@ -27,6 +27,7 @@ struct cpuacct_usage {
 /* Processes status of a group of task and its child cgroups */
 struct cpuacct_procs_stat {
 	unsigned long procs_stat[CPUACCT_PROCS_STAT_NSTATS];
+	unsigned long irq[NR_SOFTIRQS];
 };
 
 /* track CPU usage of a group of tasks and its child groups */
@@ -36,6 +37,7 @@ struct cpuacct {
 	struct cpuacct_usage __percpu	*cpuusage;
 	struct kernel_cpustat __percpu	*cpustat;
 	struct cpuacct_procs_stat *procs_stat;
+	struct cpuacct_softirq *softirq;
 };
 
 static inline struct cpuacct *css_ca(struct cgroup_subsys_state *css)
@@ -81,7 +83,7 @@ bool task_in_nonroot_cpuacct(struct task_struct *tsk)
 
 /* return processes stat of a group to which this task belongs */
 unsigned long task_ca_procs_stat(struct task_struct *tsk, int cpu,
-	int index)
+	int index, int m_index)
 {
 	struct cpuacct *ca;
 	unsigned long res = 0;
@@ -90,15 +92,20 @@ unsigned long task_ca_procs_stat(struct task_struct *tsk, int cpu,
 		return 0;
 
 	ca = task_ca(tsk);
-	if (ca)
-		res = per_cpu_ptr(ca->procs_stat, cpu)->procs_stat[index];
+	if (ca) {
+		if (m_index == 0) {
+			res = per_cpu_ptr(ca->procs_stat, cpu)->procs_stat[index];
+		} else {
+			res = per_cpu_ptr(ca->procs_stat, cpu)->irq[index];
+		}
+	}
 
 	return res;
 }
 
 /* update processes stat of a group to which this task belongs */
 void update_cpuacct_procs_stat(struct task_struct *tsk, int cpu, int index,
-	int inc)
+	int inc, int m_index)
 {
 	struct cpuacct *ca;
 	unsigned long *res;
@@ -108,8 +115,13 @@ void update_cpuacct_procs_stat(struct task_struct *tsk, int cpu, int index,
 
 	ca = task_ca(tsk);
 	if (ca) {
-		res = &(per_cpu_ptr(ca->procs_stat, cpu)->procs_stat[index]);
-		*res += inc;
+		if (m_index == 0) {
+			res = &(per_cpu_ptr(ca->procs_stat, cpu)->procs_stat[index]);
+			*res += inc;
+		} else {
+			res = &(per_cpu_ptr(ca->procs_stat, cpu)->irq[index]);
+			*res += inc;
+		}	
 	}
 }
 
