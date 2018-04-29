@@ -614,7 +614,7 @@ static int cgroup_procs_stat_show(struct seq_file *s, void *v)
 	struct cgroup_pidlist *l;
 	enum cgroup_filetype type = seq_cft(s)->private;
 	struct task_struct *tsk;
-	int ret, i = 0;
+	int ret, i = 0, j = 0, tmp = 0;
 	unsigned long forks = 0, iowait = 0, nr_runnable = 0;
 	pid_t *start;
 	struct timespec64 boottime;
@@ -682,9 +682,9 @@ static int cgroup_procs_stat_show(struct seq_file *s, void *v)
 		}
 	}
 
-	seq_printf(s, "softirq %ld ", sum_softirq);
+	seq_printf(s, "softirq %lu ", sum_softirq);
 	for (j = 0; j < NR_SOFTIRQS; j++) {
-		seq_printf(s, "%ld ", per_softirq_nums[j]);
+		seq_printf(s, "%lu ", per_softirq_nums[j]);
 	}
 	seq_printf(s, "\n");
 
