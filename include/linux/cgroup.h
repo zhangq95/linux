@@ -113,6 +113,8 @@ int task_cgroup_path(struct task_struct *task, char *buf, size_t buflen);
 int cgroupstats_build(struct cgroupstats *stats, struct dentry *dentry);
 int proc_cgroup_show(struct seq_file *m, struct pid_namespace *ns,
 		     struct pid *pid, struct task_struct *tsk);
+extern struct cgroup_subsys_state *global_cgroup_css(struct cgroup *cgrp,
+						     int ssid);
 
 void cgroup_fork(struct task_struct *p);
 extern int cgroup_can_fork(struct task_struct *p);
@@ -696,12 +698,41 @@ static inline void cgroup_path_from_kernfs_id(const union kernfs_node_id *id,
 #ifdef CONFIG_CGROUPS
 
 #ifdef CONFIG_CGROUP_CPUACCT
+enum {
+	CPUACCT_PROCS_RUNNING = 0,
+	CPUACCT_PROCS_IOWAIT,
+	CPUACCT_PROCS_FORKS,
+	CPUACCT_PROCS_SWITCHES,
+
+	CPUACCT_PROCS_STAT_NSTATS,
+};
 void cpuacct_charge(struct task_struct *tsk, u64 cputime);
 void cpuacct_account_field(struct task_struct *tsk, int index, u64 val);
+unsigned long task_ca_procs_stat(struct task_struct *tsk, int cpu,
+	int index, int m_index);
+void update_cpuacct_procs_stat(struct task_struct *tsk, int cpu,
+	int index, int inc, int m_index);
+bool task_in_nonroot_cpuacct(struct task_struct *tsk);
+void update_cpuacct_running_from_tg(struct task_group *tg,
+	int cpu, int inc);
 #else
 static inline void cpuacct_charge(struct task_struct *tsk, u64 cputime) {}
 static inline void cpuacct_account_field(struct task_struct *tsk, int index,
 					 u64 val) {}
+static inline unsigned long
+task_ca_procs_stat(struct task_struct *tsk, int cpu,
+	int index, int m_index) { return 0; }
+
+static inline void
+update_cpuacct_procs_stat(struct task_struct *tsk, int cpu,
+	int index, int inc, int m_index) {}
+
+static inline bool
+task_in_nonroot_cpuacct(struct task_struct *tsk) { return false; }
+
+static inline void
+update_cpuacct_running_from_tg(struct task_group *tg,
+	int cpu, int inc) {}
 #endif
 
 void __cgroup_account_cputime(struct cgroup *cgrp, u64 delta_exec);

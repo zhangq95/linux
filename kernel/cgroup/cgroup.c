@@ -54,6 +54,8 @@
 #include <linux/proc_ns.h>
 #include <linux/nsproxy.h>
 #include <linux/file.h>
+#include <linux/cgroup.h>
+#include <linux/pid_namespace.h>
 #include <net/sock.h>
 
 #define CREATE_TRACE_POINTS
@@ -483,6 +485,12 @@ static struct cgroup_subsys_state *cgroup_tryget_css(struct cgroup *cgrp,
 	rcu_read_unlock();
 
 	return css;
+}
+
+struct cgroup_subsys_state *global_cgroup_css(struct cgroup *cgrp,
+						     int ssid)
+{
+	return cgroup_tryget_css(cgrp, cgroup_subsys[(ssid)]);
 }
 
 /**

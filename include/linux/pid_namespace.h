@@ -100,4 +100,10 @@ extern struct pid_namespace *task_active_pid_ns(struct task_struct *tsk);
 void pidhash_init(void);
 void pid_idr_init(void);
 
+/* Determine if task is in root_namespace */
+static inline bool in_noninit_pid_ns(struct task_struct *tsk)
+{
+	return task_active_pid_ns(tsk) != &init_pid_ns;
+}
+
 #endif /* _LINUX_PID_NS_H */

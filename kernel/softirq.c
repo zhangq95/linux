@@ -26,6 +26,7 @@
 #include <linux/smpboot.h>
 #include <linux/tick.h>
 #include <linux/irq.h>
+#include <linux/cgroup.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/irq.h>
@@ -248,6 +249,7 @@ asmlinkage __visible void __softirq_entry __do_softirq(void)
 	bool in_hardirq;
 	__u32 pending;
 	int softirq_bit;
+	struct task_struct *p = current;
 
 	/*
 	 * Mask out PF_MEMALLOC s current task context is borrowed for the
@@ -280,6 +282,9 @@ restart:
 		prev_count = preempt_count();
 
 		kstat_incr_softirqs_this_cpu(vec_nr);
+		if (task_active_pid_ns(p))
+			update_cpuacct_procs_stat(p, p->cpu,
+				vec_nr, 1, 1);
 
 		trace_softirq_entry(vec_nr);
 		h->action(h);
